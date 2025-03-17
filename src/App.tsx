@@ -26,6 +26,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Constants
 const TOAST_DURATION = 5000;
@@ -36,6 +50,13 @@ interface SavedTable {
   name: string;
   input: string;
   output: string;
+  columnSettings: {
+    detectColumns: boolean;
+    columnCount: number;
+    columnDelimiter: string;
+    outputFormat: "tab" | "csv" | "markdown" | "aligned";
+    showLineNumbers: boolean;
+  };
   createdAt: string;
 }
 
@@ -49,6 +70,21 @@ const TableFormatter = () => {
   const [tableToDelete, setTableToDelete] = useState<string | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  const [columnDelimiter, setColumnDelimiter] = useState<string>("\t");
+  const [detectColumns, setDetectColumns] = useState<boolean>(true);
+  const [columnCount, setColumnCount] = useState<number>(2);
+  const [outputFormat, setOutputFormat] = useState<
+    "tab" | "csv" | "markdown" | "aligned"
+  >("aligned");
+
+  const delimiterOptions = [
+    { value: "\t", label: "Tab" },
+    { value: ",", label: "Comma" },
+    { value: "|", label: "Pipe" },
+    { value: ";", label: "Semicolon" },
+    { value: " ", label: "Space" },
+  ];
 
   // Load saved tables on component mount
   useEffect(() => {
@@ -90,54 +126,195 @@ const TableFormatter = () => {
         return "";
       }
 
-      const entries: string[] = [];
-
-      // First, split by line breaks to handle entries that are already separated
+      // Split by line breaks first
       const lines = text.split("\n").filter((line) => line.trim() !== "");
 
+      // Initialize array for table data with row arrays
+      const tableData: string[][] = [];
+
+      // Process each line
       for (const line of lines) {
-        // Check if the line starts with a number (handles formats like "001" or "1")
-        const numberPrefixMatch = line.match(
-          /^\s*(\d+)(?:\s+|\.\s*|\\-\s*)(.*)/,
-        );
+        // First check if line already has the delimiter
+        if (detectColumns && line.includes(columnDelimiter)) {
+          // Line already has columns, split by the delimiter
+          const rowData = line
+            .split(columnDelimiter)
+            .map((cell) => cell.trim());
 
-        if (numberPrefixMatch && numberPrefixMatch[2]) {
-          // Line starts with a number prefix, extract just the content part
-          entries.push(numberPrefixMatch[2].trim());
-        } else if (line.trim()) {
-          // Just a normal line with no number prefix
-          entries.push(line.trim());
-        }
-      }
+          // If it has a number prefix in the first column, strip it
+          const firstCellMatch = rowData[0].match(
+            /^\s*(\d+)(?:\s+|\.\s*|\\-\s*)(.*)/,
+          );
+          if (firstCellMatch && firstCellMatch[2]) {
+            rowData[0] = firstCellMatch[2].trim();
+          }
 
-      // If we didn't find any entries with line breaks, try to parse as a continuous string
-      if (entries.length === 0) {
-        // This regex will match entries that start with a number (1-999) followed by text
-        const entriesRegex = /(?:^|\s)(\d{1,3})\s+((?:(?!\s+\d{1,3}\s+).)+)/g;
-        let match;
+          tableData.push(rowData);
+        } else {
+          // For non-delimited lines
+          const numberPrefixMatch = line.match(
+            /^\s*(\d+)(?:\s+|\.\s*|\\-\s*)(.*)/,
+          );
 
-        // Find all matches in the input text
-        while ((match = entriesRegex.exec(text)) !== null) {
-          entries.push(match[2].trim());
+          if (numberPrefixMatch && numberPrefixMatch[2]) {
+            // Line with number prefix
+            const content = numberPrefixMatch[2].trim();
 
-          // Adjust the lastIndex to avoid infinite loops
-          if (match.index === entriesRegex.lastIndex) {
-            entriesRegex.lastIndex++;
+            // Check if we can split the content into columns
+            if (detectColumns) {
+              // Try to split by common delimiters if none specified
+              const possibleDelimiters = ["\t", ",", "|", ";"];
+              let rowData: string[] = [content];
+
+              for (const delimiter of possibleDelimiters) {
+                if (content.includes(delimiter)) {
+                  rowData = content.split(delimiter).map((cell) => cell.trim());
+                  break;
+                }
+              }
+
+              tableData.push(rowData);
+            } else {
+              // Single column mode
+              tableData.push([content]);
+            }
+          } else if (line.trim()) {
+            // Line without number prefix
+            if (detectColumns) {
+              // Try to split by common delimiters
+              const possibleDelimiters = ["\t", ",", "|", ";"];
+              let rowData: string[] = [line.trim()];
+
+              for (const delimiter of possibleDelimiters) {
+                if (line.includes(delimiter)) {
+                  rowData = line.split(delimiter).map((cell) => cell.trim());
+                  break;
+                }
+              }
+
+              tableData.push(rowData);
+            } else {
+              tableData.push([line.trim()]);
+            }
           }
         }
       }
 
-      // Format with or without line numbers based on the toggle
-      const formattedEntries = entries.map((entry, index) => {
-        if (withLineNumbers) {
-          const number = String(index + 1).padStart(3, "0");
-          return `${number} ${entry}`;
-        } else {
-          return entry;
+      // If we're in manual column mode and not detecting columns
+      if (!detectColumns && columnCount > 1) {
+        // Ensure each row has the specified number of columns
+        tableData.forEach((row, index) => {
+          while (row.length < columnCount) {
+            row.push(""); // Add empty cells as needed
+          }
+
+          if (row.length > columnCount) {
+            row.splice(columnCount); // Truncate if too many columns
+          }
+        });
+      }
+
+      // Format the table data based on the selected output format
+      return formatOutput(tableData, withLineNumbers, outputFormat);
+    },
+    [columnDelimiter, detectColumns, columnCount, outputFormat],
+  );
+
+  // New function to format the output based on selected format
+  const formatOutput = useCallback(
+    (
+      tableData: string[][],
+      withLineNumbers: boolean,
+      format: "tab" | "csv" | "markdown" | "aligned",
+    ): string => {
+      // Find the max width for each column for aligned format
+      const columnWidths: number[] = [];
+
+      if (format === "aligned") {
+        // Calculate max width for each column
+        tableData.forEach((row) => {
+          row.forEach((cell, colIndex) => {
+            columnWidths[colIndex] = Math.max(
+              columnWidths[colIndex] || 0,
+              cell.length,
+            );
+          });
+        });
+      }
+
+      // Format rows
+      const formattedRows = tableData.map((row, rowIndex) => {
+        let formattedRow = "";
+
+        switch (format) {
+          case "tab":
+            formattedRow = row.join("\t");
+            // Add line numbers if enabled for tab format
+            if (withLineNumbers) {
+              formattedRow =
+                String(rowIndex + 1).padStart(3, "0") + " " + formattedRow;
+            }
+            break;
+          case "csv":
+            formattedRow = row
+              .map((cell) => {
+                // Escape quotes and wrap in quotes if needed
+                if (cell.includes(",") || cell.includes('"')) {
+                  return `"${cell.replace(/"/g, '""')}"`;
+                }
+                return cell;
+              })
+              .join(",");
+            // Add line numbers if enabled for csv format
+            if (withLineNumbers) {
+              formattedRow =
+                String(rowIndex + 1).padStart(3, "0") + " " + formattedRow;
+            }
+            break;
+          case "markdown":
+            // For markdown, we need to handle line numbers differently to maintain valid syntax
+            if (withLineNumbers) {
+              // Add line number as the first column inside the table
+              const rowNumber = String(rowIndex + 1).padStart(3, "0");
+              formattedRow = "| " + rowNumber + " | " + row.join(" | ") + " |";
+
+              // Add markdown header row if this is the first row
+              if (rowIndex === 0 && tableData.length > 1) {
+                // Include additional column for line numbers in the header separator
+                const headerSeparator =
+                  "| --- | " + row.map((_) => "---").join(" | ") + " |";
+                formattedRow += "\n" + headerSeparator;
+              }
+            } else {
+              // Standard markdown format without line numbers
+              formattedRow = "| " + row.join(" | ") + " |";
+
+              // Add markdown header row if this is the first row
+              if (rowIndex === 0 && tableData.length > 1) {
+                const headerSeparator =
+                  "| " + row.map((_) => "---").join(" | ") + " |";
+                formattedRow += "\n" + headerSeparator;
+              }
+            }
+            break;
+          case "aligned":
+            formattedRow = row
+              .map((cell, colIndex) => {
+                return cell.padEnd(columnWidths[colIndex] + 2);
+              })
+              .join("");
+            // Add line numbers if enabled for aligned format
+            if (withLineNumbers) {
+              formattedRow =
+                String(rowIndex + 1).padStart(3, "0") + " " + formattedRow;
+            }
+            break;
         }
+
+        return formattedRow;
       });
 
-      return formattedEntries.join("\n");
+      return formattedRows.join("\n");
     },
     [],
   );
@@ -266,6 +443,13 @@ const TableFormatter = () => {
       name: tableName,
       input,
       output,
+      columnSettings: {
+        detectColumns,
+        columnCount,
+        columnDelimiter,
+        outputFormat,
+        showLineNumbers,
+      },
       createdAt: new Date().toISOString(),
     };
 
@@ -284,7 +468,16 @@ const TableFormatter = () => {
   const restoreTable = (tableData: SavedTable) => {
     setInput(tableData.input);
 
-    // Instead of using the saved output directly, reformat with current line number setting
+    // Restore column settings
+    if (tableData.columnSettings) {
+      setDetectColumns(tableData.columnSettings.detectColumns);
+      setColumnCount(tableData.columnSettings.columnCount);
+      setColumnDelimiter(tableData.columnSettings.columnDelimiter);
+      setOutputFormat(tableData.columnSettings.outputFormat);
+      setShowLineNumbers(tableData.columnSettings.showLineNumbers);
+    }
+
+    // Format with current settings
     const currentInput = tableData.input;
     if (currentInput.trim()) {
       formatTable(currentInput);
@@ -445,6 +638,123 @@ const TableFormatter = () => {
             <Clipboard className="mr-2 h-4 w-4" />
             Copy to Clipboard
           </Button>
+        </div>
+        <div className="mt-4 p-4 border rounded-md">
+          <h3 className="text-sm font-medium mb-2">Column Settings</h3>
+
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="detectColumns"
+                checked={detectColumns}
+                onCheckedChange={(checked) =>
+                  setDetectColumns(checked === true)
+                }
+                aria-label="Auto-detect columns"
+              />
+              <label
+                htmlFor="detectColumns"
+                className="text-sm font-medium leading-none"
+              >
+                Auto-detect columns
+              </label>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="p-0 h-6 w-6 rounded-full"
+                      aria-label="Help"
+                    >
+                      <span className="text-xs">?</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="w-64 text-xs">
+                      When enabled, the formatter will try to detect columns
+                      using common delimiters. Turn off to manually set column
+                      count.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+
+            {!detectColumns && (
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="columnCount"
+                  className="text-sm whitespace-nowrap"
+                >
+                  Column Count:
+                </label>
+                <Input
+                  id="columnCount"
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={columnCount}
+                  onChange={(e) =>
+                    setColumnCount(Math.max(1, parseInt(e.target.value) || 1))
+                  }
+                  className="w-16"
+                  aria-label="Number of columns"
+                />
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="columnDelimiter"
+                className="text-sm whitespace-nowrap"
+              >
+                Column Delimiter:
+              </label>
+              <Select
+                value={columnDelimiter}
+                onValueChange={setColumnDelimiter}
+              >
+                <SelectTrigger className="w-32" id="columnDelimiter">
+                  <SelectValue placeholder="Delimiter" />
+                </SelectTrigger>
+                <SelectContent>
+                  {delimiterOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="outputFormat"
+                className="text-sm whitespace-nowrap"
+              >
+                Output Format:
+              </label>
+              <Select
+                value={outputFormat}
+                onValueChange={(value) =>
+                  setOutputFormat(
+                    value as "tab" | "csv" | "markdown" | "aligned",
+                  )
+                }
+              >
+                <SelectTrigger className="w-32" id="outputFormat">
+                  <SelectValue placeholder="Format" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="aligned">Aligned</SelectItem>
+                  <SelectItem value="tab">Tab</SelectItem>
+                  <SelectItem value="csv">CSV</SelectItem>
+                  <SelectItem value="markdown">Markdown</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
 
         {/* Saved Tables Section with optimized AnimatePresence */}
