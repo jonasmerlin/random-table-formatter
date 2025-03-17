@@ -202,7 +202,7 @@ const TableFormatter = () => {
       // If we're in manual column mode and not detecting columns
       if (!detectColumns && columnCount > 1) {
         // Ensure each row has the specified number of columns
-        tableData.forEach((row, index) => {
+        tableData.forEach((row) => {
           while (row.length < columnCount) {
             row.push(""); // Add empty cells as needed
           }
@@ -341,7 +341,7 @@ const TableFormatter = () => {
       toast.success("Copied to clipboard!", {
         duration: TOAST_DURATION,
       });
-    } catch (error) {
+    } catch {
       toast.error("Failed to copy to clipboard", {
         duration: TOAST_DURATION,
       });
