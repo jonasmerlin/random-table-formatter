@@ -71,11 +71,11 @@ const TableFormatter = () => {
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const [columnDelimiter, setColumnDelimiter] = useState<string>("\t");
-  const [detectColumns, setDetectColumns] = useState<boolean>(true);
+  const [detectColumns, setDetectColumns] = useState<boolean>(false);
   const [columnCount, setColumnCount] = useState<number>(2);
   const [outputFormat, setOutputFormat] = useState<
-    "tab" | "csv" | "markdown" | "aligned"
-  >("aligned");
+    "tab" | "csv" | "markdown" | "aligned" | undefined
+  >(undefined);
 
   const delimiterOptions = [
     { value: "\t", label: "Tab" },
@@ -175,7 +175,7 @@ const TableFormatter = () => {
               tableData.push(rowData);
             } else {
               // Single column mode
-              tableData.push([content]);
+              tableData.push([content.trim()]);
             }
           } else if (line.trim()) {
             // Line without number prefix
@@ -224,7 +224,7 @@ const TableFormatter = () => {
     (
       tableData: string[][],
       withLineNumbers: boolean,
-      format: "tab" | "csv" | "markdown" | "aligned",
+      format: "tab" | "csv" | "markdown" | "aligned" | undefined,
     ): string => {
       // Find the max width for each column for aligned format
       const columnWidths: number[] = [];
@@ -303,6 +303,14 @@ const TableFormatter = () => {
               })
               .join("");
             // Add line numbers if enabled for aligned format
+            if (withLineNumbers) {
+              formattedRow =
+                String(rowIndex + 1).padStart(3, "0") + " " + formattedRow;
+            }
+            break;
+          default:
+            formattedRow = row.join("\n");
+            // Add line numbers if enabled for tab format
             if (withLineNumbers) {
               formattedRow =
                 String(rowIndex + 1).padStart(3, "0") + " " + formattedRow;
